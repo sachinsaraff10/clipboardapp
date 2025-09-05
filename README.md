@@ -36,7 +36,7 @@ python -m venv .venv
 ```
 ###3.Install requirements and run
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt pyperclip keyboard
 python clipboard.py
 ```
 
