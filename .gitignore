@@ -1,0 +1,30 @@
+# Byte-compiled / caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# IDE/editor
+.vscode/
+.idea/
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+
+# Other
+*.zip
+*.exe
+history.json

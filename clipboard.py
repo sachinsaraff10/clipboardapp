@@ -4,7 +4,7 @@
 # In[2]:
 
 
-import os
+import os, shutil
 import json
 import time
 import threading
@@ -12,6 +12,7 @@ import tkinter as tk
 from tkinter import messagebox
 import pyperclip
 import keyboard
+# import syspyinstaller --onefile --noconsole --clean --name
 
 
 # In[3]:
@@ -55,7 +56,29 @@ def load_history():
 
 # In[6]:
 
+def add_to_startup(app_name="ClipMVP", exe_path=None):
+    """
+    Creates a shortcut to the app in the Windows Startup folder
+    so it launches automatically on login.
+    """
+    try:
+        startup_dir = os.path.join(os.getenv("APPDATA"), 
+                                   "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
+        os.makedirs(startup_dir, exist_ok=True)
 
+        if exe_path is None:
+            exe_path = os.path.abspath(sys.argv[0])  # current script or exe
+
+        shortcut_path = os.path.join(startup_dir, f"{app_name}.url")
+
+        # .url file is a simple shortcut format, no external deps needed
+        with open(shortcut_path, "w") as shortcut:
+            shortcut.write(f"[InternetShortcut]\nURL=file:///{exe_path.replace(os.sep, '/')}\n")
+
+        return True
+    except Exception as e:
+        print("Failed to add to startup:", e)
+        return False
 def save_history():
     try:
         with open(HISTORY_PATH, "w", encoding="utf-8") as f:
@@ -179,13 +202,29 @@ def show_history_window():
             messagebox.showinfo("Clipboard", "Combined text copied. Press Ctrl+V to paste.")
 
     def delete_selected():
-        selected = lb.curselection()
+        selected = list(lb.curselection())
         if not selected:
             return
-        idx = selected[0]
-        items.pop(idx)
-        lb.delete(idx)
-        save_history(items)
+
+        # Collect values to remove
+        values_to_remove = [items[i] for i in selected]
+
+        with _history_lock:
+            # Remove from clipboard_history (the true persistent list)
+            clipboard_history[:] = [h for h in clipboard_history if h not in values_to_remove]
+
+            # Save to disk
+            save_history()
+
+        # Refresh UI
+        lb.delete(0, tk.END)
+        with _history_lock:
+            refreshed = clipboard_history[:200]
+        for it in refreshed:
+            disp = it.replace("\n", " ⏎ ").strip()
+            if len(disp) > 140:
+                disp = disp[:140] + " …"
+            lb.insert(tk.END, disp)
 
 
     def on_double_click(_evt):
