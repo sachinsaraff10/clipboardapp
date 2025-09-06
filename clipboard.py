@@ -176,13 +176,25 @@ def show_history_window():
     btns = tk.Frame(win)
     btns.pack(fill=tk.X, padx=8, pady=(0,8))
 
+    with _history_lock:
+        items = clipboard_history[:200]
+
+# dictionary mapping UI index -> full text
+    index_to_text = {}
+
+    for idx, item in enumerate(items):
+        display = item.replace("\n", " ⏎ ").strip()
+        if len(display) > 140:
+            display = display[:140] + " …"
+        lb.insert(tk.END, display)
+        index_to_text[idx] = item   # store full version
+
     def selected_texts():
         idxs = lb.curselection()
         if not idxs:
             return []
-        # Map UI indices back to the actual strings
-        with _history_lock:
-            return [items[i] for i in idxs if 0 <= i < len(items)]
+        return [index_to_text[i] for i in idxs]
+
 
     def copy_selected():
         texts = selected_texts()
@@ -193,6 +205,7 @@ def show_history_window():
         combined = "\n\n".join(t.strip() for t in texts if t.strip())
         pyperclip.copy(combined)
 
+    
     def combine_and_paste():
         copy_selected()
         # Send Ctrl+V to paste wherever the focus is
