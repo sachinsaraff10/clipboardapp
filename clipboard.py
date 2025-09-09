@@ -35,8 +35,8 @@ os.makedirs(APP_DIR, exist_ok=True)
 _history_lock = threading.Lock()
 clipboard_history = []
 last_clipboard = ""
-
-
+_watcher_started = False
+_ignore_until=0.0
 # In[5]:
 
 
@@ -101,11 +101,13 @@ def add_clip(text: str):
     if not text:
         return
     with _history_lock:
+        # if newest already equals this text, skip
+        if clipboard_history and clipboard_history[0] == text:
+            return
         # Move to top if it already exists elsewhere
         if text in clipboard_history:
             clipboard_history.remove(text)
         clipboard_history.insert(0, text)
-        # Trim
         if len(clipboard_history) > MAX_HISTORY:
             del clipboard_history[MAX_HISTORY:]
         save_history()
@@ -115,11 +117,24 @@ def add_clip(text: str):
 
 
 def watch_clipboard():
-    global last_clipboard
+    global last_clipboard, _ignore_until
     while True:
         try:
             text = pyperclip.paste()
-            if isinstance(text, str) and text and text != last_clipboard:
+            # ignore non-string or empty
+            if not isinstance(text, str) or not text.strip():
+                time.sleep(POLL_INTERVAL)
+                continue
+
+            # If within ignore window, skip (this prevents programmatic-copies being re-added)
+            if time.time() < _ignore_until:
+                # update last_clipboard so we don't re-add after ignore window
+                last_clipboard = text
+                time.sleep(POLL_INTERVAL)
+                continue
+
+            # usual dedupe by last_clipboard
+            if text != last_clipboard:
                 last_clipboard = text
                 add_clip(text)
         except Exception:
@@ -194,15 +209,19 @@ def show_history_window():
         if not idxs:
             return []
         return [index_to_text[i] for i in idxs]
-
+ 
 
     def copy_selected():
         texts = selected_texts()
         if not texts:
             messagebox.showwarning("Clipboard", "Select one or more entries.")
             return
-        # Join as separate paragraphs
         combined = "\n\n".join(t.strip() for t in texts if t.strip())
+
+        # set ignore window and update last_clipboard before copying
+        global _ignore_until, last_clipboard
+        last_clipboard = combined
+        _ignore_until = time.time() + 0.6   # ignore watcher for 600 ms
         pyperclip.copy(combined)
 
     
@@ -215,41 +234,75 @@ def show_history_window():
             messagebox.showinfo("Clipboard", "Combined text copied. Press Ctrl+V to paste.")
 
     def delete_selected():
-        selected = list(lb.curselection())
-        if not selected:
+        # get current selection indices from the Listbox
+        sel = lb.curselection()
+        if not sel:
             return
 
-        # Collect values to remove
-        values_to_remove = [items[i] for i in selected]
+        # Normalize selection indices to ints and sort descending (safer)
+        try:
+            sel_idxs = sorted([int(i) for i in sel], reverse=True)
+        except Exception:
+            sel_idxs = sorted([int(i) for i in sel], reverse=True)
+
+        # Build a fresh snapshot of what is currently displayed (under lock)
+        with _history_lock:
+            items = clipboard_history[:200]  # snapshot for the UI slice
+
+        # Defensive: clamp indices to available range and map to full texts
+        texts_to_remove = []
+        for i in sel_idxs:
+            if 0 <= i < len(items):
+                texts_to_remove.append(items[i])
+            else:
+                # index out of range — ignore that index (prevents the crash)
+                continue
+
+        if not texts_to_remove:
+            return
+
+        # Remove exactly one occurrence per selected item from the global clipboard_history
+        from collections import Counter
+        counts = Counter(texts_to_remove)
 
         with _history_lock:
-            # Remove from clipboard_history (the true persistent list)
-            clipboard_history[:] = [h for h in clipboard_history if h not in values_to_remove]
+            new_hist = []
+            for h in clipboard_history:
+                if counts[h] > 0:
+                    counts[h] -= 1
+                    continue
+                new_hist.append(h)
+            clipboard_history[:] = new_hist
+            save_history()  # persist change
 
-            # Save to disk
-            save_history()
-
-        # Refresh UI
+        # Rebuild UI (clear and repopulate), and rebuild index_to_text mapping
         lb.delete(0, tk.END)
         with _history_lock:
             refreshed = clipboard_history[:200]
-        for it in refreshed:
+
+        index_to_text.clear()
+        for idx, it in enumerate(refreshed):
             disp = it.replace("\n", " ⏎ ").strip()
             if len(disp) > 140:
                 disp = disp[:140] + " …"
             lb.insert(tk.END, disp)
+            index_to_text[idx] = it
 
-
+    
     def on_double_click(_evt):
-        # Double-click on one item: copy and paste that single item
         sel = selected_texts()
         if not sel:
             return
-        pyperclip.copy(sel[0])
+        full = sel[0]
+        global _ignore_until, last_clipboard
+        last_clipboard = full
+        _ignore_until = time.time() + 0.6
+        pyperclip.copy(full)
         try:
             keyboard.send("ctrl+v")
         finally:
             win.destroy()
+
 
     # Buttons
     tk.Button(btns, text="Copy Combined", command=copy_selected).pack(side=tk.LEFT, padx=(0,8))
@@ -267,12 +320,19 @@ def show_history_window():
 
 
 def main():
+    global _watcher_started
     load_history()
-    threading.Thread(target=watch_clipboard, daemon=True).start()
-    keyboard.add_hotkey(HOTKEY_OPEN, show_history_window)
+    if not _watcher_started:
+        threading.Thread(target=watch_clipboard, daemon=True).start()
+        _watcher_started = True
+    
+    app_root= tk.Tk()
+    app_root.withdraw()
+    keyboard.add_hotkey(HOTKEY_OPEN, lambda: app_root.after(0, show_history_window))
     print(f"ClipMVP running. Press {HOTKEY_OPEN} to open history.")
-    # NOTE: keyboard may require Administrator privileges on some systems
-    keyboard.wait()
+    # run the Tk event loop (keeps app alive and services after() calls)
+    app_root.mainloop()
+    ...
 
 
 # In[ ]:
