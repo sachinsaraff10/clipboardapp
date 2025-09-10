@@ -146,7 +146,7 @@ def watch_clipboard():
 
 
 def show_history_window():
-    # Build GUI
+    # Build GUIF
     win = tk.Tk()
     win.title("Clipboard History")
     win.geometry("520x380")
@@ -344,7 +344,7 @@ def main():
 # In[1]:
 
 
-show_history_window()
+# show_history_window()
 
 
 # In[11]:
