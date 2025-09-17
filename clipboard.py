@@ -280,13 +280,35 @@ def show_history_window():
     with _history_lock:
         items = clipboard_history[:200]
 
-    for item in items:
+    index_to_text = {}
+    for idx,item in enumerate(items):
         display = item.replace("\n", " ⏎ ").strip()
         if len(display) > 140:
             display = display[:140] + " …"
         lb.insert(tk.END, display)
+        index_to_text[idx]  = item
+    
+    def _on_local_copy(event=None):
+        # Use your mapping index_to_text built when populating the list
+        sel = lb.curselection()
+        if not sel:
+            return "break"
+        texts = [ index_to_text[int(i)] for i in sel if int(i) in index_to_text ]
+        if not texts:
+            return "break"
+        if len(texts) == 1:
+            # copy single full text
+            safe_copy(texts[0])
+        else:
+            # combine multiple into separate paragraphs
+            combined = "\n\n".join(t.strip() for t in texts if t.strip())
+            safe_copy(combined)
+        return "break"
 
-    # helpers that map UI selection -> full texts
+    # Bind Ctrl+C (case-insensitive) while the widget has focus
+    lb.bind("<Control-c>", _on_local_copy)
+    lb.bind("<Control-C>", _on_local_copy)
+        # helpers that map UI selection -> full texts
     def selected_texts():
         idxs = lb.curselection()
         if not idxs:
@@ -327,8 +349,10 @@ def show_history_window():
             save_history()
         # refresh listbox
         lb.delete(0, tk.END)
+
         with _history_lock:
             refreshed = clipboard_history[:200]
+        
         for it in refreshed:
             disp = it.replace("\n", " ⏎ ").strip()
             if len(disp) > 140:
